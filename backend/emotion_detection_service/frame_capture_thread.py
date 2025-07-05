@@ -1,6 +1,11 @@
+import sys
 import threading
-import cv2
 import time
+
+import cv2
+
+from emotion_detection_service.exception import CustomException
+from emotion_detection_service.logger import logging
 
 
 class FrameCaptureThread(threading.Thread):
@@ -40,7 +45,7 @@ class FrameCaptureThread(threading.Thread):
                 self.failure_count = 0
             else:
                 self.failure_count += 1
-                print(f"[Camera {self.cam_id}] Frame grab failed ({self.failure_count})")
+                logging.warning(f"[Camera {self.cam_id}] Frame grab failed ({self.failure_count})")
                 if self.failure_count >= self.max_failures:
                     self.reconnect()
             # Reduce CPU usage with a small sleep
@@ -53,7 +58,7 @@ class FrameCaptureThread(threading.Thread):
             return self.latest_frame.copy() if self.latest_frame is not None else None
 
     def reconnect(self):
-        print(f"[Camera {self.cam_id}] Reconnecting to stream...")
+        logging.info(f"[Camera {self.cam_id}] Reconnecting to stream...")
         try:
             self.capture.release()
             time.sleep(1)
@@ -62,13 +67,14 @@ class FrameCaptureThread(threading.Thread):
             for attempt in range(3):
                 self.capture = cv2.VideoCapture(self.src, cv2.CAP_FFMPEG)
                 if self.capture.isOpened():
-                    print(f"[Camera {self.cam_id}] Reconnected on attempt {attempt + 1}")
+                    logging.info(f"[Camera {self.cam_id}] Reconnected on attempt {attempt + 1}")
                     break
                 time.sleep(2)
             else:
-                print(f"[Camera {self.cam_id}] Failed to reconnect after 3 attempts.")
+                logging.error(f"[Camera {self.cam_id}] Failed to reconnect after 3 attempts.")
         except Exception as e:
-            print(f"[Camera {self.cam_id}] Reconnect error: {e}")
+            logging.exception(f"[Camera {self.cam_id}] Reconnect error: {e}")
+            raise CustomException(e, sys)
         self.failure_count = 0
 
     def stop(self):

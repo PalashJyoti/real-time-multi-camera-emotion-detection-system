@@ -1,32 +1,22 @@
-import logging
 import os
+import sys
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from collections import deque
-import torch
-from skimage.feature import local_binary_pattern
 
 import cv2
 import numpy as np
+import torch
+from skimage.feature import local_binary_pattern
 
-from app.camera.routes import thickness
 import emotion_detection_service.globals as globals_module
+from emotion_detection_service.exception import CustomException
+from emotion_detection_service.logger import logging
 from emotion_detection_service.predict import predict_emotion
 from extensions import db
 from models import DetectionLog, Camera, CameraStatus
-
-# Configure logging
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARN)
-
-if not logger.handlers:  # Avoid duplicate logs
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
 
 FACE_DETECTOR_PROTO = "emotion_detection_service/deploy.prototxt"
 FACE_DETECTOR_MODEL = "emotion_detection_service/res10_300x300_ssd_iter_140000.caffemodel"
@@ -54,7 +44,7 @@ class EmotionDetectorThread(threading.Thread):
         # Check if CUDA is available for OpenCV
         self.has_cv_cuda = cv2.cuda.getCudaEnabledDeviceCount() > 0
         if self.has_cv_cuda:
-            logger.info(f"OpenCV CUDA support enabled for camera {cam_id}")
+            logging.info(f"OpenCV CUDA support enabled for camera {cam_id}")
             # Create CUDA streams for parallel processing
             self.cuda_stream = cv2.cuda.Stream()
 
@@ -63,7 +53,7 @@ class EmotionDetectorThread(threading.Thread):
         if self.has_cv_cuda:
             self.face_net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
             self.face_net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-        logger.debug("Face detector loaded.")
+        logging.debug("Face detector loaded.")
 
         if self.src.startswith("rtsp://") and "rtsp_transport=tcp" not in self.src:
             self.src += "?rtsp_transport=tcp"
@@ -96,13 +86,13 @@ class EmotionDetectorThread(threading.Thread):
 
         # Check 1: Minimum size filter
         if h < 40 or w < 40:
-            logger.debug(f"Face too small: {w}x{h}")
+            logging.debug(f"Face too small: {w}x{h}")
             return False
 
         # Check 2: Aspect ratio check (faces are roughly square to slightly rectangular)
         aspect_ratio = w / h
         if aspect_ratio < 0.5 or aspect_ratio > 2.0:
-            logger.debug(f"Invalid aspect ratio: {aspect_ratio}")
+            logging.debug(f"Invalid aspect ratio: {aspect_ratio}")
             return False
 
         # Check 3: Check for sufficient variation in pixel values
@@ -111,20 +101,20 @@ class EmotionDetectorThread(threading.Thread):
         # Calculate standard deviation - faces should have good contrast
         std_dev = np.std(gray)
         if std_dev < 10:  # Too uniform, likely not a face
-            logger.debug(f"Low contrast region, std_dev: {std_dev}")
+            logging.debug(f"Low contrast region, std_dev: {std_dev}")
             return False
 
         # Check 4: Edge density check - faces have good edge content
         edges = cv2.Canny(gray, 50, 150)
         edge_density = np.sum(edges > 0) / (h * w)
         if edge_density < 0.015:  # Too few edges
-            logger.debug(f"Low edge density: {edge_density}")
+            logging.debug(f"Low edge density: {edge_density}")
             return False
 
         # Check 5: Brightness check - avoid very dark or very bright regions
         mean_brightness = np.mean(gray)
         if mean_brightness < 30 or mean_brightness > 220:
-            logger.debug(f"Extreme brightness: {mean_brightness}")
+            logging.debug(f"Extreme brightness: {mean_brightness}")
             return False
 
         # New check 6: Circularity test (faces are rarely perfect circles)
@@ -136,7 +126,7 @@ class EmotionDetectorThread(threading.Thread):
             if perimeter > 0:
                 circularity = 4 * np.pi * area / (perimeter ** 2)
                 if circularity > 0.8:  # Reject perfect circles
-                    logger.debug(f"Circular object rejected: {circularity:.2f}")
+                    logging.debug(f"Circular object rejected: {circularity:.2f}")
                     return False
 
         # New check 7: Texture analysis using LBP
@@ -144,14 +134,14 @@ class EmotionDetectorThread(threading.Thread):
         hist, _ = np.histogram(lbp, bins=59, density=True)
         texture_score = np.std(hist)
         if texture_score < 0.15:  # Faces have complex textures
-            logger.debug(f"Low texture variation: {texture_score:.2f}")
+            logging.debug(f"Low texture variation: {texture_score:.2f}")
             return False
 
         return True
 
     def detect_faces(self, frame, conf_threshold=0.7):
         h, w = frame.shape[:2]
-        logger.debug(f"Input frame dimensions: width={w}, height={h}")
+        logging.debug(f"Input frame dimensions: width={w}, height={h}")
 
         # Preprocess frame for better detection in low quality
         enhanced_frame = self.enhance_frame_quality(frame)
@@ -171,7 +161,7 @@ class EmotionDetectorThread(threading.Thread):
         faces = []
         for i in range(detections.shape[2]):
             confidence = detections[0, 0, i, 2]
-            logger.debug(f"Detection {i}: confidence={confidence:.4f}")
+            logging.debug(f"Detection {i}: confidence={confidence:.4f}")
 
             # Increase confidence threshold to reduce false positives
             if confidence > conf_threshold:  # Use higher threshold
@@ -192,11 +182,11 @@ class EmotionDetectorThread(threading.Thread):
                 # Validate if it's actually a face
                 if self.is_valid_face(face_region):
                     faces.append((x1, y1, x2 - x1, y2 - y1))
-                    logger.debug(f"Valid face detected with box coordinates: {(x1, y1, x2, y2)}")
+                    logging.debug(f"Valid face detected with box coordinates: {(x1, y1, x2, y2)}")
                 else:
-                    logger.debug(f"Invalid face rejected at coordinates: {(x1, y1, x2, y2)}")
+                    logging.debug(f"Invalid face rejected at coordinates: {(x1, y1, x2, y2)}")
 
-        logger.info(f"Total valid faces detected: {len(faces)}")
+        logging.info(f"Total valid faces detected: {len(faces)}")
         return faces
 
     def enhance_frame_quality(self, frame):
@@ -225,31 +215,31 @@ class EmotionDetectorThread(threading.Thread):
         return enhanced_frame
 
     def _frame_grabber(self):
-        logger.info("Frame grabber thread started.")
+        logging.info("Frame grabber thread started.")
         while self.grab_running:
             ret, frame = self.capture.read()
             if ret:
                 with self.frame_lock:
                     self.raw_frame = frame.copy()
                 self.failure_count = 0
-                logger.debug("Frame grabbed successfully.")
+                logging.debug("Frame grabbed successfully.")
             else:
                 self.failure_count += 1
-                logger.warning(f"Failed to grab frame. Failure count: {self.failure_count}")
+                logging.warning(f"Failed to grab frame. Failure count: {self.failure_count}")
                 if self.failure_count >= self.max_failures:
-                    logger.error("Max failure count reached, attempting to reconnect.")
+                    logging.error("Max failure count reached, attempting to reconnect.")
                     self.reconnect()
                     self.failure_count = 0
             time.sleep(0.03)
-        logger.info("Frame grabber thread stopped.")
+        logging.info("Frame grabber thread stopped.")
 
     def get_latest_frame(self):
         with self.frame_lock:
             if self.processed_frame is not None:
-                logger.debug("Returning a copy of the latest processed frame.")
+                logging.debug("Returning a copy of the latest processed frame.")
                 return self.processed_frame.copy()
             else:
-                logger.debug("No processed frame available to return.")
+                logging.debug("No processed frame available to return.")
                 return None
 
     def save_alert(self, face_img, emotion, confidence):
@@ -261,8 +251,8 @@ class EmotionDetectorThread(threading.Thread):
         filepath = os.path.join(self.alerts_dir, filename)
         cv2.imwrite(filepath, face_img)
 
-        logger.info(f"Alert saved: {filepath}")
-        logger.debug(f"IST time: {datetime.now(IST)}")
+        logging.info(f"Alert saved: {filepath}")
+        logging.debug(f"IST time: {datetime.now(IST)}")
 
         # Store only relative path in DB
         relative_image_url = f"/static/alerts/{filename}"
@@ -282,20 +272,21 @@ class EmotionDetectorThread(threading.Thread):
                 )
                 db.session.add(alert)
                 db.session.commit()
-                logger.info("Alert logged to DB.")
+                logging.info("Alert logged to DB.")
             except Exception as e:
                 db.session.rollback()
-                logger.error(f"Failed to log alert to DB: {e}")
+                logging.error(f"Failed to log alert to DB: {e}")
+                raise CustomException(e, sys)
 
     def reconnect(self):
-        logger.warning(f"Reconnecting camera {self.cam_id}")
+        logging.warning(f"Reconnecting camera {self.cam_id}")
         self.capture.release()
         time.sleep(2)
         self.capture = cv2.VideoCapture(self.src, cv2.CAP_FFMPEG)
 
         # Check if reconnection worked
         if not self.capture.isOpened():
-            logger.error(f"Failed to reconnect camera {self.cam_id}")
+            logging.error(f"Failed to reconnect camera {self.cam_id}")
             self.failure_count = 0
 
             with self.app.app_context():
@@ -305,49 +296,45 @@ class EmotionDetectorThread(threading.Thread):
                     if camera:
                         camera.status = CameraStatus.Inactive
                         db.session.commit()
-                        logger.info(f"Marked camera {self.cam_id} as Inactive due to repeated failures.")
+                        logging.info(f"Marked camera {self.cam_id} as Inactive due to repeated failures.")
 
                     # Stop and remove from manager
                     globals_module.manager.remove_camera(self.cam_id)
 
                 except Exception as e:
                     db.session.rollback()
-                    logger.error(f"Could not update camera status: {e}")
+                    logging.error(f"Could not update camera status: {e}")
+                    raise CustomException(e, sys)
         else:
-            logger.info(f"Reconnected camera {self.cam_id}")
+            logging.info(f"Reconnected camera {self.cam_id}")
             self.failure_count = 0
 
     def run(self):
-        FONT = cv2.FONT_HERSHEY_SIMPLEX
-        FONT_SCALE = 0.8  # balanced for 720p and 1080p
-        THICKNESS = 2
-        COLOR = (0, 255, 0)  # green overlay (can also use red/yellow for alerts)
-        LINE_TYPE = cv2.LINE_AA
 
-        logger.info(f"Starting emotion detection run loop for camera {self.cam_id}")
+        logging.info(f"Starting emotion detection run loop for camera {self.cam_id}")
 
         while self.running:
             with self.frame_lock:
                 frame = self.raw_frame.copy() if self.raw_frame is not None else None
             if frame is None:
-                logger.debug("No frame available yet, sleeping briefly")
+                logging.debug("No frame available yet, sleeping briefly")
                 time.sleep(0.01)
                 continue
 
             faces = []
             if self.no_face_counter < self.no_face_threshold:
                 faces = self.detect_faces(frame)
-                logger.debug(f"Detected {len(faces)} faces")
+                logging.debug(f"Detected {len(faces)} faces")
                 if not faces:
                     self.no_face_counter += 1
-                    logger.debug(f"No faces detected, incrementing no_face_counter to {self.no_face_counter}")
+                    logging.debug(f"No faces detected, incrementing no_face_counter to {self.no_face_counter}")
                 else:
                     self.no_face_counter = 0
             else:
                 self.no_face_counter += 1
-                logger.debug(f"Skipping face detection, no_face_counter={self.no_face_counter}")
+                logging.debug(f"Skipping face detection, no_face_counter={self.no_face_counter}")
                 if self.no_face_counter > self.no_face_threshold + 3:
-                    logger.debug("Resetting no_face_counter after skipping frames")
+                    logging.debug("Resetting no_face_counter after skipping frames")
                     self.no_face_counter = 0
 
             for (x, y, w, h) in faces:
@@ -355,11 +342,11 @@ class EmotionDetectorThread(threading.Thread):
 
                 # Additional validation before emotion prediction
                 if not self.is_valid_face(face_img):
-                    logger.debug("Skipping emotion prediction for invalid face region")
+                    logging.debug("Skipping emotion prediction for invalid face region")
                     continue
 
                 emotion, confidence = predict_emotion(face_img, self.model_path)
-                logger.debug(f"Predicted emotion: {emotion} with confidence {confidence:.2f}")
+                logging.debug(f"Predicted emotion: {emotion} with confidence {confidence:.2f}")
 
                 # Increase confidence threshold for emotion prediction
                 if confidence >= 0.65:  # Increased from 0.6 to 0.75
@@ -382,7 +369,7 @@ class EmotionDetectorThread(threading.Thread):
 
                         # Additional check: require at least 6 out of 10 frames to be the same negative emotion
                         if count >= 5 and most_common_emotion != self.last_negative_emotion:
-                            logger.info(
+                            logging.info(
                                 f"Sustained negative emotion detected: {most_common_emotion} with ratio {ratio:.2f}")
                             self.save_alert(face_img, most_common_emotion, confidence)
                             self.last_negative_emotion = most_common_emotion
@@ -405,7 +392,7 @@ class EmotionDetectorThread(threading.Thread):
 
             time.sleep(0)
 
-        logger.info(f"Stopping emotion detection run loop for camera {self.cam_id}")
+        logging.info(f"Stopping emotion detection run loop for camera {self.cam_id}")
 
         self.grab_running = False
         self.grab_thread.join()
@@ -428,7 +415,7 @@ class EmotionDetectorThread(threading.Thread):
 
     # Modify the stop method
     def stop(self):
-        logger.info(f"Stopping camera processing for camera {self.cam_id}")
+        logging.info(f"Stopping camera processing for camera {self.cam_id}")
         self.running = False  # Stop the detection loop
         self.grab_running = False  # Stop the frame grabber loop
         if self.grab_thread.is_alive():
@@ -437,4 +424,4 @@ class EmotionDetectorThread(threading.Thread):
             self.join(timeout=5)
         self.capture.release()
         self.cleanup_resources()  # Add this line
-        logger.info(f"Camera {self.cam_id} stopped and resources released")
+        logging.info(f"Camera {self.cam_id} stopped and resources released")

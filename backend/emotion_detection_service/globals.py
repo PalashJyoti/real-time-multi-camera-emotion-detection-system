@@ -1,22 +1,13 @@
-import logging
+import sys
 from threading import Lock
 from typing import Optional
 
 import torch
 from torchvision import transforms
 
+from emotion_detection_service.exception import CustomException
+from emotion_detection_service.logger import logging
 from emotion_detection_service.model import ResEmoteNet
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARN)
-
-if not logger.handlers:  # Avoid duplicate logs
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-
 
 # Face detector model files (adjust if needed)
 FACE_DETECTOR_PROTO = "emotion_detection_service/deploy.prototxt"
@@ -37,29 +28,29 @@ _transform = transforms.Compose([
 ])
 
 
-
 def load_model(model_path: str):
     global _model
     with _model_lock:
         if _model is None:
-            logger.debug("Loading emotion detection model...")
+            logging.debug("Loading emotion detection model...")
             try:
                 _model = ResEmoteNet().to(_device)
                 checkpoint = torch.load(model_path, map_location=_device)
                 _model.load_state_dict(checkpoint['model_state_dict'])
                 _model.eval()
-                logger.info("Emotion detection model loaded successfully.")
+                logging.info("Emotion detection model loaded successfully.")
             except Exception as e:
-                logger.error(f"Failed to load model: {e}")
-                raise
+                logging.error(f"Failed to load model: {e}")
+                raise CustomException(e, sys)
 
 
 def init_camera_manager(model_path: str, app):
     global manager
     from emotion_detection_service.multi_camera_manager import MultiCameraManager
-    logger.debug("Initializing multi-camera manager...")
+    logging.debug("Initializing multi-camera manager...")
     manager = MultiCameraManager(model_path=model_path, app=app)
     return manager
+
 
 # Enhanced GPU detection and configuration
 def get_optimal_device():
@@ -81,13 +72,14 @@ def get_optimal_device():
     else:
         return torch.device('cpu')
 
+
 # Use the optimal device
 _device = get_optimal_device()
-logger.info(f"Using device: {_device}")
+logging.info(f"Using device: {_device}")
 
 # Configure PyTorch for better performance
 if _device.type == 'cuda':
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = False
-    logger.info(f"CUDA Device: {torch.cuda.get_device_name(_device.index)}")
-    logger.info(f"CUDA Capability: {torch.cuda.get_device_capability(_device.index)}")
+    logging.info(f"CUDA Device: {torch.cuda.get_device_name(_device.index)}")
+    logging.info(f"CUDA Capability: {torch.cuda.get_device_capability(_device.index)}")

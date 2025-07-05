@@ -1,10 +1,12 @@
-import logging
+import sys
 import threading
 import time
+
 import psutil
 import torch
 
-logger = logging.getLogger(__name__)
+from emotion_detection_service.exception import CustomException
+from emotion_detection_service.logger import logging
 
 
 class ResourceMonitor(threading.Thread):
@@ -28,16 +30,17 @@ class ResourceMonitor(threading.Thread):
                     gpu_memory_used = torch.cuda.memory_allocated() / torch.cuda.get_device_properties(
                         0).total_memory * 100
 
-                logger.info(
+                logging.info(
                     f"System resources - CPU: {cpu_percent}%, RAM: {memory.percent}%, GPU Memory: {gpu_memory_used:.1f}%")
 
                 # Take action if resources are constrained
                 if cpu_percent > 90 or memory.percent > 90 or gpu_memory_used > 90:
-                    logger.warning("System resources critically high, reducing camera processing")
+                    logging.warning("System resources critically high, reducing camera processing")
                     self._reduce_camera_load()
 
             except Exception as e:
-                logger.error(f"Error in resource monitoring: {e}")
+                logging.error(f"Error in resource monitoring: {e}")
+                raise CustomException(e, sys)
 
             time.sleep(self.check_interval)
 

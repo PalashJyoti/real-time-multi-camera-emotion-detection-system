@@ -1,24 +1,14 @@
-import logging
-
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Configure logger
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARN)
+from emotion_detection_service.logger import logging
 
-if not logger.handlers:
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
 
 # ----------- Squeeze-and-Excitation Block -----------
 class SEBlock(nn.Module):
     def __init__(self, in_channels, reduction=16):
         super().__init__()
-        logger.debug(f"Initializing SEBlock with {in_channels} channels")
+        logging.debug(f"Initializing SEBlock with {in_channels} channels")
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
             nn.Linear(in_channels, in_channels // reduction, bias=False),
@@ -28,17 +18,18 @@ class SEBlock(nn.Module):
         )
 
     def forward(self, x):
-        logger.debug("Forward pass through SEBlock")
+        logging.debug("Forward pass through SEBlock")
         b, c, _, _ = x.size()
         y = self.avg_pool(x).view(b, c)
         y = self.fc(y).view(b, c, 1, 1)
         return x * y
 
+
 # ----------- Residual Block -----------
 class ResidualBlock(nn.Module):
     def __init__(self, in_ch, out_ch, stride=1):
         super().__init__()
-        logger.debug(f"Initializing ResidualBlock from {in_ch} to {out_ch} with stride {stride}")
+        logging.debug(f"Initializing ResidualBlock from {in_ch} to {out_ch} with stride {stride}")
         self.conv1 = nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=stride, padding=1)
         self.bn1 = nn.BatchNorm2d(out_ch)
         self.conv2 = nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1)
@@ -52,17 +43,18 @@ class ResidualBlock(nn.Module):
             )
 
     def forward(self, x):
-        logger.debug("Forward pass through ResidualBlock")
+        logging.debug("Forward pass through ResidualBlock")
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
         return F.relu(out)
 
+
 # ----------- ResEmoteNet -----------
 class ResEmoteNet(nn.Module):
     def __init__(self):
         super().__init__()
-        logger.info("Initializing ResEmoteNet...")
+        logging.info("Initializing ResEmoteNet...")
         self.relu = nn.ReLU(inplace=True)
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, padding=1)
@@ -90,7 +82,7 @@ class ResEmoteNet(nn.Module):
         self.fc4 = nn.Linear(256, 7)
 
     def forward(self, x):
-        logger.debug("Forward pass through ResEmoteNet")
+        logging.debug("Forward pass through ResEmoteNet")
         x = self.relu(self.bn1(self.conv1(x)))
         x = F.max_pool2d(x, 2)
         x = self.dropout1(x)
@@ -118,5 +110,5 @@ class ResEmoteNet(nn.Module):
         x = self.dropout2(x)
 
         out = self.fc4(x)
-        logger.debug("ResEmoteNet forward pass completed")
+        logging.debug("ResEmoteNet forward pass completed")
         return out

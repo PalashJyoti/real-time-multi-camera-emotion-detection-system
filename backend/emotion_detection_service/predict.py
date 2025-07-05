@@ -1,20 +1,10 @@
-import logging
 import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
+
 from emotion_detection_service.globals import load_model, _model, _device, _labels, _transform
-
-# Setup logger
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARN)
-
-if not logger.handlers:
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
+from emotion_detection_service.logger import logging
 
 # Flag to avoid reloading model on every call
 _model_loaded = False
@@ -30,7 +20,7 @@ def predict_emotion(frame, model_path: str):
             _model_loaded = True
 
         if _model is None:
-            logger.error("Model is not loaded properly.")
+            logging.error("Model is not loaded properly.")
             return "error", 0.0
 
         # Convert image to RGB and preprocess
@@ -45,7 +35,7 @@ def predict_emotion(frame, model_path: str):
         return _labels[idx], float(probs[idx])
 
     except Exception as e:
-        logger.error(f"[predict_emotion] Error: {e}")
+        logging.error(f"[predict_emotion] Error: {e}")
         return "error", 0.0
 
 
@@ -60,7 +50,7 @@ def predict_emotions_batch(frames, model_path: str):
             _model_loaded = True
 
         if _model is None:
-            logger.error("Model is not loaded properly.")
+            logging.error("Model is not loaded properly.")
             return [("error", 0.0)] * len(frames)
 
         # Process batch of images
@@ -87,5 +77,5 @@ def predict_emotions_batch(frames, model_path: str):
         return []
 
     except Exception as e:
-        logger.error(f"[predict_emotions_batch] Error: {e}")
+        logging.error(f"[predict_emotions_batch] Error: {e}")
         return [("error", 0.0)] * len(frames)
