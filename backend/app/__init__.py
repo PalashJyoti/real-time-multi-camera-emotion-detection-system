@@ -25,7 +25,7 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     db.init_app(app)
-    CORS(app, origins=[f"http://{ipaddress}:3000","http://localhost:3000"], supports_credentials=True)
+    CORS(app, origins=[f"http://{ipaddress}:3001","http://localhost:3001"], supports_credentials=True)
 
     from app.auth.routes import auth_bp
     from app.camera.routes import camera_bp
