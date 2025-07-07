@@ -55,8 +55,12 @@ class EmotionDetectorThread(threading.Thread):
             self.face_net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
         logging.debug("Face detector loaded.")
 
-        if self.src.startswith("rtsp://") and "rtsp_transport=tcp" not in self.src:
-            self.src += "?rtsp_transport=tcp"
+        # Force TCP and keepalive in RTSP
+        if self.src.startswith("rtsp://"):
+            if "rtsp_transport=tcp" not in self.src:
+                self.src += ("&" if "?" in self.src else "?") + "rtsp_transport=tcp"
+            if "keepalive=1" not in self.src:
+                self.src += "&keepalive=1"
 
         self.capture = cv2.VideoCapture(self.src, cv2.CAP_FFMPEG)
         self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 2)  # Keep it minimal to reduce lag

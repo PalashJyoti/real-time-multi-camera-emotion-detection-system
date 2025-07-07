@@ -254,7 +254,6 @@ def change_role():
 
 
 @auth_bp.route('/users', methods=['GET'])
-@jwt_required
 def get_users():
     logging.info(f"get-users endpoint hit by user '{g.user.get('username')}'")
 

@@ -77,7 +77,6 @@ def stream(cam_id):
 
 @api_bp.route('/camera_status_update', methods=['POST'])
 def camera_status_update():
-    logging = current_app.logging
     data = request.get_json()
     camera_id = data.get('camera_id')
     status = data.get('status')
