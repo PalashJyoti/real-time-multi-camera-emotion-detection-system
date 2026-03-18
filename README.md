@@ -293,15 +293,6 @@ This system was developed exclusively for authorized military and defense use:
 
 ---
 
-## Related Projects
-
-| # | Project | Description |
-|---|---------|-------------|
-| 1 | [ArmyFaceDetection](https://github.com/PalashJyoti/ArmyFaceDetection) | Face detection and identification system for Army Corps |
-| 2 | Real-Time Multi-Camera Emotion Detection | **This project** — Multi-camera real-time emotion monitoring |
-
----
-
 ## License
 
 Developed for and in partnership with the **Indian Army Corps**. All rights reserved.  
